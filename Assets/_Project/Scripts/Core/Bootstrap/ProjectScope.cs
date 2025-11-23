@@ -1,5 +1,5 @@
-using Reflex.Core;
 using UnityEngine;
+using Reflex.Core;
 using GameArchitecture.Core.Events;
 using GameArchitecture.Core.Interfaces;
 using GameArchitecture.Core.Services;
@@ -7,31 +7,31 @@ using GameArchitecture.Core.Services;
 namespace GameArchitecture.Core.Bootstrap
 {
     /// <summary>
-    /// Project-level dependency injection container.
-    /// Persists across scenes and provides global services.
+    /// Project-wide dependency injection scope that persists across all scenes.
     /// Implements singleton pattern to ensure only one instance exists.
+    /// Uses modular installers for clean separation of concerns.
     /// </summary>
-    public class ProjectScope : MonoBehaviour, IInstaller
+    public class ProjectScope : MonoBehaviour
     {
+        [Header("Service Installers")]
+        [SerializeField] 
+        [Tooltip("Optional ScriptableObject installers for modular service registration")]
+        private ScriptableObject[] serviceInstallers;
+        
         private static ProjectScope _instance;
         private Container _container;
 
         /// <summary>
-        /// Gets the singleton instance of ProjectScope.
-        /// Returns null if ProjectScope has not been initialized yet.
+        /// Singleton instance accessor.
         /// </summary>
         public static ProjectScope Instance => _instance;
-        
-        /// <summary>
-        /// Unity Awake callback. Initializes the singleton and builds the DI container.
-        /// Ensures persistence across scene loads via DontDestroyOnLoad.
-        /// </summary>
+
         private void Awake()
         {
-            // Singleton pattern to prevent duplicates
+            // Singleton pattern: Destroy duplicates
             if (_instance != null && _instance != this)
             {
-                Debug.LogWarning("[ProjectScope] Duplicate ProjectScope detected, destroying duplicate.");
+                Debug.LogWarning("[ProjectScope] Duplicate instance detected. Destroying duplicate.");
                 Destroy(gameObject);
                 return;
             }
@@ -39,7 +39,7 @@ namespace GameArchitecture.Core.Bootstrap
             _instance = this;
             DontDestroyOnLoad(gameObject);
 
-            // Create and build the container
+            // Build the DI container
             var builder = new ContainerBuilder();
             InstallBindings(builder);
             _container = builder.Build();
@@ -49,28 +49,81 @@ namespace GameArchitecture.Core.Bootstrap
 
         /// <summary>
         /// Installs all project-level service bindings into the DI container.
-        /// Called by Reflex during container initialization.
+        /// First registers core services, then runs modular installers.
         /// </summary>
         /// <param name="containerBuilder">The container builder to register services with.</param>
         /// <remarks>
-        /// Services registered here persist across all scenes and are available globally.
-        /// Each service is registered both as its concrete type and interface type.
+        /// Core services (EventBus, GameStateService, SceneLoader) are registered directly.
+        /// Additional services (Input, Audio, etc.) are registered via installers for modularity.
         /// </remarks>
         public void InstallBindings(ContainerBuilder containerBuilder)
         {
-            // Register EventBus with factory function
-            containerBuilder.AddSingleton(c => new EventBus());
-            containerBuilder.AddSingleton<IEventBus>(c => c.Resolve<EventBus>());
-            
-            // Register GameStateService with factory function
-            containerBuilder.AddSingleton(c => new GameStateService(c.Resolve<IEventBus>()));
-            containerBuilder.AddSingleton<IGameStateService>(c => c.Resolve<GameStateService>());
-            
-            // Register SceneLoader with factory function
-            containerBuilder.AddSingleton(c => new SceneLoader(c.Resolve<IEventBus>()));
-            containerBuilder.AddSingleton<ISceneLoader>(c => c.Resolve<SceneLoader>());
+            // Register core services (no external dependencies)
+            var eventBus = RegisterCoreServices(containerBuilder);
 
-            Debug.Log("[ProjectScope] Project-level services registered.");
+            // Run modular installers for optional services
+            RunInstallers(containerBuilder, eventBus);
+
+            Debug.Log("[ProjectScope] All services registered.");
+        }
+
+        /// <summary>
+        /// Registers core services that have no external dependencies.
+        /// These services are always registered regardless of installers.
+        /// Returns the EventBus instance for use by installers.
+        /// </summary>
+        private IEventBus RegisterCoreServices(ContainerBuilder containerBuilder)
+        {
+            // Register EventBus with factory functions
+            var eventBus = new EventBus();
+            containerBuilder.AddSingleton(container => eventBus);
+            containerBuilder.AddSingleton<IEventBus>(container => eventBus);
+
+            // Register GameStateService with factory functions
+            var gameStateService = new GameStateService(eventBus);
+            containerBuilder.AddSingleton(container => gameStateService);
+            containerBuilder.AddSingleton<IGameStateService>(container => gameStateService);
+
+            // Register SceneLoader with factory functions
+            var sceneLoader = new SceneLoader(eventBus);
+            containerBuilder.AddSingleton(container => sceneLoader);
+            containerBuilder.AddSingleton<ISceneLoader>(container => sceneLoader);
+
+            Debug.Log("[ProjectScope] Core services registered.");
+            
+            return eventBus;
+        }
+
+        /// <summary>
+        /// Runs all configured service installers.
+        /// Installers provide modular service registration without coupling ProjectScope to specific systems.
+        /// </summary>
+        private void RunInstallers(ContainerBuilder containerBuilder, IEventBus eventBus)
+        {
+            if (serviceInstallers == null || serviceInstallers.Length == 0)
+            {
+                Debug.LogWarning("[ProjectScope] No service installers configured.");
+                return;
+            }
+
+            foreach (var installer in serviceInstallers)
+            {
+                if (installer == null)
+                {
+                    Debug.LogWarning("[ProjectScope] Null installer in array, skipping.");
+                    continue;
+                }
+
+                if (installer is IServiceInstaller serviceInstaller)
+                {
+                    Debug.Log($"[ProjectScope] Running installer: {installer.name}");
+                    serviceInstaller.Install(containerBuilder, eventBus);
+                }
+                else
+                {
+                    Debug.LogWarning($"[ProjectScope] {installer.name} does not implement IServiceInstaller interface!");
+                }
+            }
         }
 
         /// <summary>
@@ -79,12 +132,27 @@ namespace GameArchitecture.Core.Bootstrap
         /// </summary>
         /// <returns>The Reflex Container instance containing all registered services.</returns>
         /// <remarks>
-        /// This method is typically called by GameManager, EventSubscriberDemo, and other
-        /// components that need to manually resolve services from the container.
+        /// This method is typically called by GameManager and other components
+        /// that need to manually resolve services from the container.
         /// </remarks>
         public Container GetContainer()
         {
             return _container;
+        }
+
+        private void OnValidate()
+        {
+            // Editor-time validation
+            if (serviceInstallers != null)
+            {
+                foreach (var installer in serviceInstallers)
+                {
+                    if (installer != null && !(installer is IServiceInstaller))
+                    {
+                        Debug.LogWarning($"[ProjectScope] {installer.name} does not implement IServiceInstaller!");
+                    }
+                }
+            }
         }
     }
 }

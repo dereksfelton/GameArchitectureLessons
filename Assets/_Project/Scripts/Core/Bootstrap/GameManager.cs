@@ -4,118 +4,82 @@ using GameArchitecture.Core.Interfaces;
 using GameArchitecture.Core.Services;
 using R3;
 using R3.Unity;
-using System;
 
 namespace GameArchitecture.Core.Bootstrap
 {
     /// <summary>
     /// Main game manager that orchestrates initialization and game loop.
     /// Uses Reflex for dependency injection and R3 for reactive subscriptions.
-    /// Handles game state transitions and optional scene loading.
+    /// Handles game state transitions, scene loading, and input initialization.
     /// </summary>
     public class GameManager : MonoBehaviour
     {
-        [SerializeField] private bool _autoLoadGameplayScene = false;
-        [SerializeField] private string _gameplaySceneName = "Gameplay";
+        [Header("Scene Settings")]
+        [SerializeField] private bool autoLoadGameplayScene = true;
+        [SerializeField] private string gameplaySceneName = "Gameplay";
 
         private IGameStateService _gameStateService;
         private IEventBus _eventBus;
         private ISceneLoader _sceneLoader;
+        private IInputService _inputService;
 
         private readonly CompositeDisposable _disposables = new();
 
-        /// <summary>
-        /// Unity Awake callback. Resolves dependencies from ProjectScope container.
-        /// </summary>
         private void Awake()
         {
-            // Use the singleton instance instead of FindFirstObjectByType
             var projectScope = ProjectScope.Instance;
 
             if (projectScope == null)
             {
-                Debug.LogError("[GameManager] ProjectScope instance not found!");
+                Debug.LogError("[GameManager] ProjectScope not found!");
                 return;
             }
 
             var container = projectScope.GetContainer();
-
-            if (container == null)
-            {
-                Debug.LogError("[GameManager] Container is null!");
-                return;
-            }
-
             _gameStateService = container.Resolve<IGameStateService>();
             _eventBus = container.Resolve<IEventBus>();
             _sceneLoader = container.Resolve<ISceneLoader>();
+            _inputService = container.Resolve<IInputService>();
 
-            Debug.Log("[GameManager] Dependencies resolved from ProjectScope container.");
+            Debug.Log("[GameManager] Dependencies resolved.");
         }
 
-        /// <summary>
-        /// Unity Start callback. Initializes game systems and optionally loads gameplay scene.
-        /// </summary>
         private async void Start()
         {
-            // Add null checks for debugging
-            if (_gameStateService == null)
+            if (_gameStateService == null || _eventBus == null)
             {
-                Debug.LogError("[GameManager] IGameStateService resolution failed!");
+                Debug.LogError("[GameManager] Dependency resolution failed!");
                 return;
             }
 
-            if (_eventBus == null)
-            {
-                Debug.LogError("[GameManager] IEventBus resolution failed!");
-                return;
-            }
-
-            Debug.Log("[GameManager] Dependencies validated.");
-            await InitializeGameAsync();
-
-            // Optionally load gameplay scene
-            if (_autoLoadGameplayScene && _sceneLoader != null)
-            {
-                Debug.Log($"[GameManager] Loading {_gameplaySceneName} scene...");
-                await _sceneLoader.LoadSceneAsync(_gameplaySceneName);
-            }
-        }
-
-        /// <summary>
-        /// Initializes game systems asynchronously.
-        /// Subscribes to game state change events and starts the game.
-        /// </summary>
-        /// <returns>A UniTask representing the async initialization operation.</returns>
-        private async UniTask InitializeGameAsync()
-        {
-            Debug.Log("[GameManager] Initializing game systems...");
-
-            // Subscribe to game state changes
+            // Subscribe to game state changes - FIXED: Use Observe().Subscribe()
             _eventBus.Observe<GameStateChangedEvent>()
                 .Subscribe(OnGameStateChanged)
                 .AddTo(_disposables);
 
-            // Initialize game systems
+            Debug.Log("[GameManager] Initialization started.");
+
+            // Initialize game state service
             await _gameStateService.InitializeAsync();
 
-            // Automatically start game for this lesson
-            await UniTask.Delay(1000);
-            await _gameStateService.StartGameAsync();
+            // Enable input
+            _inputService.Enable();
+            Debug.Log("[GameManager] Input enabled.");
 
-            Debug.Log("[GameManager] Game initialized and started.");
+            // Auto-load gameplay scene if configured
+            if (autoLoadGameplayScene && !string.IsNullOrEmpty(gameplaySceneName))
+            {
+                Debug.Log($"[GameManager] Loading scene: {gameplaySceneName}");
+                await _sceneLoader.LoadSceneAsync(gameplaySceneName);
+            }
         }
 
-        /// <summary>
-        /// Handles game state change events.
-        /// Adjusts Time.timeScale based on Playing/Paused states.
-        /// </summary>
-        /// <param name="evt">The state change event containing previous and new states.</param>
         private void OnGameStateChanged(GameStateChangedEvent evt)
         {
-            Debug.Log($"[GameManager] State changed: {evt.PreviousState} → {evt.NewState}");
-
-            // React to state changes here
+            // FIXED: Use PreviousState and NewState (not OldState)
+            Debug.Log($"[GameManager] Game state changed: {evt.PreviousState} -> {evt.NewState}");
+            
+            // React to state changes
             switch (evt.NewState)
             {
                 case GameState.Playing:
@@ -127,13 +91,10 @@ namespace GameArchitecture.Core.Bootstrap
             }
         }
 
-        /// <summary>
-        /// Unity OnDestroy callback. Cleans up subscriptions and shuts down services.
-        /// </summary>
         private void OnDestroy()
         {
-            _gameStateService?.Shutdown();
-            _disposables?.Dispose();
+            _disposables.Dispose();
+            Debug.Log("[GameManager] Disposed subscriptions.");
         }
     }
 }

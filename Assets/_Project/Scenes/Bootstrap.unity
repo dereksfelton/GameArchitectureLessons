@@ -413,6 +413,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b84ebe1d207d930499e31a88140744d9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GameArchitecture.Core.Bootstrap.ProjectScope
+  serviceInstallers:
+  - {fileID: 11400000, guid: 7fc5d8ccfbe2414438311acf8b896249, type: 2}
 --- !u!4 &823332885
 Transform:
   m_ObjectHideFlags: 0
@@ -470,8 +472,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 673690b26c764264e814c6bc6d270a12, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::GameArchitecture.Core.Bootstrap.GameManager
-  _autoLoadGameplayScene: 1
-  _gameplaySceneName: Gameplay
+  autoLoadGameplayScene: 1
+  gameplaySceneName: Gameplay
 --- !u!4 &2034187347
 Transform:
   m_ObjectHideFlags: 0
